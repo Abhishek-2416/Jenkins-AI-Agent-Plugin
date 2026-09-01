@@ -1,0 +1,346 @@
+
+<?jelly escape-by-default="true"?>
+<j:jelly xmlns:j="jelly:core"
+         xmlns:l="/lib/layout">
+
+    <l:layout title="AI Assistant">
+
+        <l:side-panel>
+            <l:tasks>
+                <l:task
+                    href="${rootURL}/${it.build.url}"
+                    icon="symbol-arrow-left"
+                    title="Back to Build"/>
+            </l:tasks>
+        </l:side-panel>
+
+        <l:main-panel>
+
+            <h1>AI Assistant</h1>
+
+            <p>
+                AI Assistant for build #${it.build.number}
+            </p>
+
+            <p>
+                Build result:
+                <strong>${it.build.result}</strong>
+            </p>
+
+            <hr/>
+
+            <h2>Build Failure Analysis</h2>
+
+            <!-- Investigation -->
+            <div id="investigation"
+                 style="border:1px solid #ddd;
+                        border-radius:6px;
+                        padding:15px;
+                        margin-bottom:20px;">
+
+                <p id="investigation-status">
+                    Investigating build #${it.build.number}...
+                </p>
+
+                <div id="investigation-result"
+                     style="white-space:pre-wrap;">
+                </div>
+
+            </div>
+
+            <!-- Chat -->
+            <h2>Ask the AI Assistant</h2>
+
+            <div id="ai-chat"
+                 style="border:1px solid #ddd;
+                        border-radius:6px;
+                        padding:20px;
+                        max-width:900px;">
+
+                <div id="chat-messages"
+                     style="min-height:100px;
+                            max-height:500px;
+                            overflow-y:auto;
+                            margin-bottom:20px;">
+
+                </div>
+
+                <div style="display:flex; gap:10px;">
+
+                    <input
+                        id="chat-input"
+                        type="text"
+                        placeholder="Ask a question about this build..."
+                        disabled="disabled"
+                        style="flex:1;
+                               padding:10px;
+                               border:1px solid #ccc;
+                               border-radius:4px;"/>
+
+                    <button
+                        id="chat-send"
+                        type="button"
+                        class="jenkins-button jenkins-button--primary"
+                        disabled="disabled">
+                        Send
+                    </button>
+
+                </div>
+
+            </div>
+
+            <script>
+                (function () {
+
+                    const jobName = "${it.build.parent.fullName}";
+                    const buildNumber = "${it.build.number}";
+
+                    const investigationStatus =
+                        document.getElementById("investigation-status");
+
+                    const investigationResult =
+                        document.getElementById("investigation-result");
+
+                    const messages =
+                        document.getElementById("chat-messages");
+
+                    const input =
+                        document.getElementById("chat-input");
+
+                    const sendButton =
+                        document.getElementById("chat-send");
+
+
+                    function addMessage(sender, text) {
+
+                        const message =
+                            document.createElement("div");
+
+                        message.style.marginBottom = "15px";
+
+                        const senderElement =
+                            document.createElement("strong");
+
+                        senderElement.textContent =
+                            sender + ":";
+
+                        const textElement =
+                            document.createElement("div");
+
+                        textElement.style.marginTop = "5px";
+                        textElement.style.whiteSpace = "pre-wrap";
+                        textElement.textContent = text;
+
+                        message.appendChild(senderElement);
+                        message.appendChild(textElement);
+
+                        messages.appendChild(message);
+
+                        messages.scrollTop =
+                            messages.scrollHeight;
+                    }
+
+
+                    async function runInvestigation() {
+
+                        try {
+
+                            const response = await fetch(
+                                "http://localhost:8000/api/ai/investigate/"
+                                + encodeURIComponent(jobName)
+                                + "/"
+                                + buildNumber
+                            );
+
+                            if (!response.ok) {
+
+                                throw new Error(
+                                    "Investigation failed with HTTP "
+                                    + response.status
+                                );
+
+                            }
+
+                            const data =
+                                await response.json();
+
+                            console.log(
+                                "Investigation response:",
+                                data
+                            );
+
+                            /*
+                             * The backend investigation response contains
+                             * the investigation answer. If the backend
+                             * returns a different field, we can adjust
+                             * this after seeing the actual response.
+                             */
+                            const answer =
+                                data.answer ||
+                                data.message ||
+                                JSON.stringify(data);
+
+                            investigationStatus.textContent =
+                                "Investigation complete.";
+
+                            investigationResult.textContent =
+                                answer;
+
+                            addMessage(
+                                "AI Assistant",
+                                answer
+                            );
+
+                            /*
+                             * Investigation is now active, so enable chat.
+                             */
+                            input.disabled = false;
+                            sendButton.disabled = false;
+
+                            input.focus();
+
+                        } catch (error) {
+
+                            console.error(
+                                "Investigation error:",
+                                error
+                            );
+
+                            investigationStatus.textContent =
+                                "Could not investigate this build.";
+
+                            investigationResult.textContent =
+                                "Unable to reach the AI backend.";
+
+                        }
+
+                    }
+
+
+                    async function sendMessage() {
+
+                        const question =
+                            input.value.trim();
+
+                        if (!question) {
+                            return;
+                        }
+
+                        input.value = "";
+
+                        addMessage(
+                            "You",
+                            question
+                        );
+
+                        sendButton.disabled = true;
+                        input.disabled = true;
+
+                        try {
+
+                            const response = await fetch(
+                                "http://localhost:8000/api/ai/chat/"
+                                + encodeURIComponent(jobName)
+                                + "/"
+                                + buildNumber,
+                                {
+                                    method: "POST",
+
+                                    headers: {
+                                        "Content-Type":
+                                            "application/json"
+                                    },
+
+                                    body: JSON.stringify({
+                                        message: question
+                                    })
+                                }
+                            );
+
+                            if (!response.ok) {
+
+                                throw new Error(
+                                    "Chat request failed with HTTP "
+                                    + response.status
+                                );
+
+                            }
+
+                            const data =
+                                await response.json();
+
+                            console.log(
+                                "Chat response:",
+                                data
+                            );
+
+                            const answer =
+                                data.answer ||
+                                data.message ||
+                                "No answer returned.";
+
+                            addMessage(
+                                "AI Assistant",
+                                answer
+                            );
+
+                        } catch (error) {
+
+                            console.error(
+                                "Chat error:",
+                                error
+                            );
+
+                            addMessage(
+                                "AI Assistant",
+                                "Sorry, I could not reach the AI backend."
+                            );
+
+                        } finally {
+
+                            sendButton.disabled = false;
+                            input.disabled = false;
+
+                            input.focus();
+
+                        }
+
+                    }
+
+
+                    sendButton.addEventListener(
+                        "click",
+                        sendMessage
+                    );
+
+
+                    input.addEventListener(
+                        "keydown",
+                        function (event) {
+
+                            if (event.key === "Enter") {
+
+                                event.preventDefault();
+
+                                sendMessage();
+
+                            }
+
+                        }
+                    );
+
+
+                    /*
+                     * Start investigation automatically when
+                     * the AI Assistant page is opened.
+                     */
+                    runInvestigation();
+
+                })();
+            </script>
+
+        </l:main-panel>
+
+    </l:layout>
+
+</j:jelly>
